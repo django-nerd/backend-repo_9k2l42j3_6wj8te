@@ -2,8 +2,7 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import List
-from bson import ObjectId
+from typing import List, Any
 
 from database import db, create_document, get_documents
 from schemas import Product, Order, Subscriber
@@ -17,6 +16,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def seed_product_if_needed():
+    """
+    Ensure the Beast Hustle Strength Stick product exists for presale.
+    Uses SKU to prevent duplicates.
+    """
+    try:
+        if db is None:
+            return
+        products = db["product"]
+        sku = "BH-SS-001"
+        existing = products.find_one({"sku": sku})
+        if not existing:
+            data = Product(
+                title="Beast Hustle Strength Stick",
+                subtitle="Tear. Pour. Perform.",
+                description=(
+                    "30 precision-dosed sticks presented in a matte black wooden case with a magnetic "
+                    "closure. Formulated for those who demand performance without compromise."
+                ),
+                price=44.0,
+                currency="EUR",
+                images=[
+                    # Placeholder: replace with direct image URLs when available
+                ],
+                in_stock=True,
+                sku=sku,
+                limited_drop=True,
+                units_per_case=30,
+            )
+            create_document("product", data)
+    except Exception:
+        # Silent fail to avoid crashing startup if seeding cannot run
+        pass
 
 @app.get("/")
 def read_root():
@@ -57,14 +91,16 @@ def test_database():
     return response
 
 # Public catalog endpoints
-@app.get("/api/products", response_model=List[Product])
-def list_products():
+@app.get("/api/products")
+def list_products() -> List[Any]:
     docs = get_documents("product")
-    # Convert Mongo docs to Product-compatible dicts
-    products = []
+    # Convert Mongo docs to dicts including id
+    products: List[Any] = []
     for d in docs:
-        d.pop("_id", None)
-        products.append(Product(**d))
+        prod = dict(d)
+        _id = str(prod.pop("_id", ""))
+        prod["id"] = _id
+        products.append(prod)
     return products
 
 @app.post("/api/products", status_code=201)
